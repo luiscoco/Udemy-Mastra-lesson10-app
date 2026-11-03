@@ -1,0 +1,86 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Exercise real browser streaming and injected failures, then connect the same bounded retry policy to a genuine Mastra agent stream."><title>Mastra · Lesson 10 · Code walkthrough</title><link rel="icon" href="/astronaut.png"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/lesson.css"><link rel="stylesheet" href="/lab.css"><link rel="stylesheet" href="/code-highlighting.css"></head><body><a class="skip-link" href="#content">Skip to lesson content</a><main><div class="brand"><a href="/">How <span>Mastra</span> Works</a><span class="badge">LESSON 10 / STREAMING AND RETRIES</span></div><header class="hero"><div><div class="eyebrow">STREAM · CANCEL · RECOVER</div><h1>Explain the <em>actual source.</em></h1><p class="lead">Streaming Error Handling and Retries</p></div><img src="/astronaut.png" width="190" height="190" alt="Course astronaut mascot"></header><nav class="nav" aria-label="Application sections"><a href="/">Application lab</a><a href="/learn.html">What you will learn</a><a href="/run.html">How to run</a><a href="/architecture.html">Architecture & workflow</a><a href="/walkthrough.html" aria-current="page">Code walkthrough</a><button type="button" id="theme">Dark mode</button></nav><div id="content" tabindex="-1"><section class="note">The local lab uses controlled fixture text and injected errors to exercise real HTTP delivery. Live mode invokes Mastra Agent.stream. The application does not claim invented provider performance or hidden reasoning. The links and excerpts are generated from this repository; no pseudocode is presented as a running SDK integration.</section><section class="step"><h2>src/lab.ts</h2><p>This excerpt is generated from the actual implementation. The complete file and its line range are linked below.</p><div class="code-toolbar"><p class="source"><a href="https://github.com/luiscoco/Udemy-Mastra-lesson10-app/blob/main/src/lab.ts#L1-L50">src/lab.ts · lines 1–50</a></p><button type="button" data-copy="code-6">Copy code</button></div><pre><code id="code-6" class="language-typescript">import { z } from &quot;zod&quot;;
+import { createTutor } from &quot;./mastra/agents.js&quot;;
+import { delay, mayRetry } from &quot;./mastra/retries.js&quot;;
+import { assertActive, modelId, type AgentModel, type Emit, type LabResult } from &quot;./core.js&quot;;
+export const inputSchema = z.object({ scenario: z.enum([&quot;success&quot;, &quot;transient-before-text&quot;, &quot;partial-failure&quot;, &quot;permanent-before-text&quot;]), chunkDelayMs: z.number().int().min(10).max(500), maxAttempts: z.number().int().min(1).max(2) }).strict();
+const fixtureChunks = [&quot;## Local streaming fixture\\n\\n&quot;, &quot;This text is a deterministic classroom fixture, &quot;, &quot;not a model response.\\n\\n&quot;, &quot;```typescript\\n&quot;, &quot;const completed = true;\\n&quot;, &quot;```&quot;] .map(text =&gt; text.replaceAll(&quot;\\n&quot;, &quot;\n&quot;));
+export async function executeLab(raw: unknown, emit: Emit, signal: AbortSignal): Promise&lt;LabResult&gt; {
+  const input = inputSchema.parse(raw); let text = &quot;&quot;; let attempts = 0; let completed = false;
+  while (attempts &lt; input.maxAttempts) {
+    attempts++; assertActive(signal);
+    emit({ type: &quot;stage&quot;, text: `Fixture attempt ${attempts}: real timed HTTP events; no model call.` });
+    try {
+      if (input.scenario === &quot;permanent-before-text&quot;) throw Object.assign(new Error(&quot;Fixture validation failure&quot;), { statusCode: 400 });
+      if (input.scenario === &quot;transient-before-text&quot; &amp;&amp; attempts === 1) throw Object.assign(new Error(&quot;Fixture service unavailable&quot;), { statusCode: 503 });
+      for (let i = 0; i &lt; fixtureChunks.length; i++) {
+        await delay(input.chunkDelayMs, signal);
+        if (input.scenario === &quot;partial-failure&quot; &amp;&amp; i === 2) throw Object.assign(new Error(&quot;Fixture interrupted&quot;), { statusCode: 503 });
+        text += fixtureChunks[i]; emit({ type: &quot;delta&quot;, text: fixtureChunks[i] });
+      }
+      completed = true; break;
+    } catch (error) {
+      assertActive(signal);
+      if (mayRetry(error, attempts, input.maxAttempts, text.length, signal)) { emit({ type: &quot;stage&quot;, text: &quot;Transient failure before text: bounded retry permitted.&quot; }); await delay(100, signal); continue; }
+      emit({ type: &quot;stage&quot;, text: text ? &quot;Partial output retained. Automatic retry blocked after visible text.&quot; : &quot;Run failed before text; no eligible retry remains.&quot; }); break;
+    }
+  }
+  return { streamed: true, status: completed ? &quot;pass&quot; : &quot;needs-attention&quot;, summary: completed ? &quot;The labelled local fixture completed.&quot; : &quot;The fixture failed. Partial text is not a successful completion.&quot;, data: { fixture: true, modelCalled: false, attempts, visibleCharacters: text.length, completed, autoRetryAfterText: false } };
+}
+export const liveModel = (_?: unknown) =&gt; modelId();
+export async function executeLive(raw: unknown, question: string, emit: Emit, signal: AbortSignal, model?: AgentModel) {
+  const input = inputSchema.parse(raw); let text = &quot;&quot;; let attempts = 0;
+  // The agent sets maxRetries: 0 so this application owns the retry boundary.
+  const agent = createTutor(model);
+  while (attempts &lt; input.maxAttempts) {
+    attempts++; assertActive(signal);
+    emit({ type: &quot;stage&quot;, text: `Real Agent.stream() attempt ${attempts}. Fixture scenario is ignored for live generation.` });
+    try {
+      const response = await agent.stream(question, { maxSteps: 3, abortSignal: signal, modelSettings: { maxOutputTokens: 1400 } });
+      for await (const chunk of response.textStream) { assertActive(signal); text += chunk; emit({ type: &quot;delta&quot;, text: chunk }); }
+      const full = await response.getFullOutput(); if (full.error) throw full.error;
+      return { finished: full.finishReason === &quot;stop&quot; &amp;&amp; text.trim().length &gt; 0, steps: full.steps.length, details: { attempts, visibleCharacters: text.length, finishReason: full.finishReason, fixture: false } };
+    } catch (error) {
+      assertActive(signal);
+      if (mayRetry(error, attempts, input.maxAttempts, text.length, signal)) { emit({ type: &quot;stage&quot;, text: &quot;Transient failure before text: retrying once.&quot; }); await delay(250, signal); continue; }
+      return { finished: false, steps: 0, details: { attempts, visibleCharacters: text.length, partial: text.length &gt; 0, fixture: false, retryEligible: false } };
+    }
+  }
+  return { finished: false, steps: 0, details: { attempts, fixture: false } };
+}
+export async function dispose() {}</code></pre></section><section class="step"><h2>src/mastra/retries.ts</h2><p>This excerpt is generated from the actual implementation. The complete file and its line range are linked below.</p><div class="code-toolbar"><p class="source"><a href="https://github.com/luiscoco/Udemy-Mastra-lesson10-app/blob/main/src/mastra/retries.ts#L1-L16">src/mastra/retries.ts · lines 1–16</a></p><button type="button" data-copy="code-7">Copy code</button></div><pre><code id="code-7" class="language-typescript">export function transient(error: unknown) {
+  const value = error as { statusCode?: number; status?: number; code?: string };
+  return [408, 429, 500, 502, 503, 504].includes(value?.statusCode || value?.status || 0) || [&quot;ECONNRESET&quot;, &quot;ETIMEDOUT&quot;].includes(value?.code || &quot;&quot;);
+}
+export function mayRetry(error: unknown, attempt: number, maximum: number, visibleCharacters: number, signal: AbortSignal) {
+  return !signal.aborted &amp;&amp; visibleCharacters === 0 &amp;&amp; attempt &lt; maximum &amp;&amp; transient(error);
+}
+export async function delay(ms: number, signal: AbortSignal) {
+  if (signal.aborted) throw new DOMException(&quot;Cancelled&quot;, &quot;AbortError&quot;);
+  await new Promise&lt;void&gt;((resolve, reject) =&gt; {
+    const done = () =&gt; { signal.removeEventListener(&quot;abort&quot;, abort); resolve(); };
+    const timer = setTimeout(done, ms);
+    const abort = () =&gt; { clearTimeout(timer); signal.removeEventListener(&quot;abort&quot;, abort); reject(new DOMException(&quot;Cancelled&quot;, &quot;AbortError&quot;)); };
+    signal.addEventListener(&quot;abort&quot;, abort, { once: true });
+  });
+}</code></pre></section><section class="step"><h2>src/mastra/agents.ts</h2><p>This excerpt is generated from the actual implementation. The complete file and its line range are linked below.</p><div class="code-toolbar"><p class="source"><a href="https://github.com/luiscoco/Udemy-Mastra-lesson10-app/blob/main/src/mastra/agents.ts#L1-L5">src/mastra/agents.ts · lines 1–5</a></p><button type="button" data-copy="code-8">Copy code</button></div><pre><code id="code-8" class="language-typescript">import { Agent } from &quot;@mastra/core/agent&quot;;
+import { modelId, type AgentModel } from &quot;../core.js&quot;;
+export const instructions = &quot;Explain streaming, cancellation and bounded retries accurately. Partial output is not a completed answer. Use Markdown with fenced TypeScript code.&quot;;
+export function createTutor(model?: AgentModel) { return new Agent({ id: &quot;lesson-10-tutor&quot;, name: &quot;Lesson 10 tutor&quot;, instructions, model: model || modelId(), maxRetries: 0 }); }
+export const tutor = createTutor();</code></pre></section><section class="step"><h2>src/mastra/index.ts</h2><p>This excerpt is generated from the actual implementation. The complete file and its line range are linked below.</p><div class="code-toolbar"><p class="source"><a href="https://github.com/luiscoco/Udemy-Mastra-lesson10-app/blob/main/src/mastra/index.ts#L1-L3">src/mastra/index.ts · lines 1–3</a></p><button type="button" data-copy="code-9">Copy code</button></div><pre><code id="code-9" class="language-typescript">import { Mastra } from &quot;@mastra/core/mastra&quot;;
+import { tutor } from &quot;./agents.js&quot;;
+export const mastra = new Mastra({ agents: { tutor: tutor } });</code></pre></section><section class="step"><h2>Shared generation boundary</h2><p>The common helper calls the real Agent API with explicit limits. Lesson-specific code selects the registered agent, inputs and additional validation.</p><div class="code-toolbar"><p class="source"><a href="https://github.com/luiscoco/Udemy-Mastra-lesson10-app/blob/main/src/core.ts#L39-L54">src/core.ts · lines 39–54</a></p><button type="button" data-copy="code-10">Copy code</button></div><pre><code id="code-10" class="language-typescript">export async function generateAnswer(agent: Agent, question: string, emit: Emit, signal: AbortSignal,
+  options: { maxOutputTokens?: number; temperature?: number } = {}) {
+  assertActive(signal);
+  emit({ type: &quot;stage&quot;, text: &quot;Calling the registered agent with generate(); the provider performs the model work.&quot; });
+  const response = await agent.generate(question, { maxSteps: MAX_STEPS, abortSignal: signal,
+    modelSettings: { maxOutputTokens: options.maxOutputTokens || 1200, ...(options.temperature === undefined ? {} : { temperature: options.temperature }) } });
+  assertActive(signal);
+  if (response.error) throw response.error;
+  if (response.text) emit({ type: &quot;answer&quot;, text: response.text });
+  return { finished: response.finishReason === &quot;stop&quot; &amp;&amp; response.text.trim().length &gt; 0,
+    text: response.text, steps: response.steps.length, finishReason: response.finishReason,
+    toolCalls: response.toolCalls.length, details: { finishReason: response.finishReason, toolCalls: response.toolCalls.length } };
+}
+export function resultMarkdown(result: LabResult) {
+  return `## ${result.status === &quot;pass&quot; ? &quot;Practical result&quot; : &quot;Review the result&quot;}\n\n${result.summary}\n\n\`\`\`json\n${JSON.stringify(result.data, null, 2)}\n\`\`\``;
+}</code></pre></section><section class="step"><h2>Make one focused change</h2><p>Compare transient-before-text with partial-failure, then cancel during delivery. Use the observed attempt count and final state to explain when retrying is appropriate.</p></section></div><footer>MASTRA AI AGENTS · LESSON 10 · STREAMING ERROR HANDLING AND RETRIES<br>Independent TypeScript application · provider credentials stay on the server<br><a href="https://github.com/luiscoco/Udemy-Mastra-lesson10-app">Source on GitHub</a> · <a href="https://mastra.ai/docs">Official Mastra documentation</a></footer></main><script src="/navigation.js"></script><script src="/prism.js"></script><script src="/code-highlighting.js"></script></body></html>
