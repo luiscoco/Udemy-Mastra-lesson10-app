@@ -15,6 +15,8 @@ export type LessonMetadata = {
   objectives: { title: string; text: string }[]; workflow: string[]; scope: string;
   examples: { name: string; input: unknown; expected: string }[];
   sourceFiles: string[]; exercise: string; checks: { question: string; answer: string }[];
+  readmeWorkflow: { step: string; component: string; behavior: string }[];
+  liveWorkflow: string[]; outcomeNotes: string[];
   docs: { title: string; url: string }[];
 };
 export const requestSchema = z.object({ input: z.unknown(), question: z.string().trim().min(1).max(1500) }).strict();

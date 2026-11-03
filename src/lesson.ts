@@ -106,5 +106,38 @@ export const LESSON = {
       "title": "Agent generation and limits",
       "url": "https://mastra.ai/reference/agents/generate"
     }
+  ],
+  "readmeWorkflow": [
+    {
+      "step": "Validate fixture policy",
+      "component": "src/lab.ts",
+      "behavior": "Choose a labelled fixture scenario, 10–500 ms chunk delay and at most two attempts."
+    },
+    {
+      "step": "Emit timed text",
+      "component": "src/lab.ts",
+      "behavior": "Send real timed NDJSON delta events with explicitly deterministic fixture text."
+    },
+    {
+      "step": "Apply retry boundary",
+      "component": "src/mastra/retries.ts",
+      "behavior": "Retry eligible transient errors only before visible text and within the attempt limit."
+    },
+    {
+      "step": "Check completion",
+      "component": "src/client.ts",
+      "behavior": "Preserve partial text; distinguish completion, partial failure, permanent failure and user cancellation."
+    }
+  ],
+  "liveWorkflow": [
+    "Ignore the fixture scenario and call the real Agent.stream() API with SDK retries explicitly set to zero.",
+    "Render textStream chunks as they arrive, then inspect getFullOutput() and the finish reason.",
+    "Apply the same bounded retry policy; never automatically replay after visible text or cancellation."
+  ],
+  "outcomeNotes": [
+    "The default transient-before-text fixture completes on attempt 2.",
+    "partial-failure retains text and stops after attempt 1, even if maxAttempts=2.",
+    "Stop aborts the HTTP request and shows Cancelled; partial text is not a completed answer.",
+    "Network chunks are arbitrary boundaries, not guaranteed words or tokens."
   ]
 } satisfies LessonMetadata;

@@ -45,8 +45,120 @@ export async function buildPages() {
   return { "index.html": index, "learn.html": learn, "run.html": run, "walkthrough.html": walkthrough, "architecture.html": architecture, "architecture.svg": svg };
 }
 export async function buildReadme() {
-  return `# Mastra · Lesson ${number} · ${L.title}\n\n${L.description}\n\n![Practical application preview](docs/application-preview.png)\n\n## Start\n\nUse Node.js 24+. This is an independent repository.\n\n\`\`\`powershell\ngit clone ${repository}.git\ncd Udemy-Mastra-lesson${number}-app\nnpm ci\nnpm start\n\`\`\`\n\nOpen http://127.0.0.1:${3200 + L.number}. **Run practical lab** executes: ${L.localMode}. Starting the host makes no model call.\n\n## Five student pages\n\nApplication lab · What you will learn · How to run · Architecture & workflow · Code walkthrough. They preserve the approved lesson 1 astronaut, typography, colors, light/dark theme, responsive layout, safe Markdown rendering, syntax colors and copy-code controls.\n\n## Implemented exercise\n\n${L.labDescription}\n\n${L.examples.map(example => `- **${example.name}:** ${example.expected}`).join("\n")}\n\n${L.scope}\n\n## Optional actual model run\n\nPreserve any existing local configuration. No credential has been copied from another app.\n\n\`\`\`powershell\nif (!(Test-Path .env)) { Copy-Item .env.example .env }\nnotepad .env\n\`\`\`\n\nEnter your own provider key, choose a model your account can access, and restart. Keys stay on the server and are ignored by Git. Shell values take precedence over the optional file. Live generation may incur provider usage; the normal practical operation does not.\n\n\`\`\`dotenv\n${(await readFile(new URL(".env.example", ROOT), "utf8")).trim()}\n\`\`\`\n\n${[3, 8].includes(L.number) ? `## Actual Mastra Studio\n\nRun \`npm run studio\` in another terminal. The pinned CLI selects port ${4200 + L.number}; use its printed URL. The conventional \`src/mastra/index.ts\` exports the registered Mastra instance. ${L.number === 8 ? 'Native trace storage and MastraStorageExporter are configured locally under the ignored .mastra directory. No external telemetry exporter or aggregate metrics backend is enabled.' : ''}\n\n` : ""}## Build and test\n\n\`\`\`powershell\nnpm run sample\nnpm run sample:live\nnpm run build\nnpm test\nnpm run test:browser\n\`\`\`\n\nThe normal sample executes the real key-free operation. The live sample requires provider configuration. Offline SDK integration tests use Mastra's explicit model-test adapter and do not make paid model calls. Browser tests execute the real local lab, navigate all five pages, check responsive behavior and safe code rendering, and capture this app's own preview. Set BROWSER_EXECUTABLE for a nonstandard Chrome/Chromium path.\n\nSource-linked excerpts and the browser script are generated from the actual implementation. Rebuild after editing source. Generated public files and dependency lockfiles are committed for reproducibility.\n\n## Student exercise\n\n${L.exercise}\n\n## Key source files\n\n${L.sourceFiles.map(path => `- [${path}](${path})`).join("\n")}\n- [Request host](src/server.ts)\n- [Execution envelope](src/runner.ts)\n- [Student page generator](scripts/build-pages.ts)\n\n## References\n\n- [Approved lesson 1 baseline](https://github.com/luiscoco/Udemy-Mastra-lesson01-app)\n${L.docs.map(item => `- [${item.title}](${item.url})`).join("\n")}\n\nThe astronaut, base styles and Prism integration follow the user's approved course assets. Prism's license remains in public/prism-LICENSE.txt. This application's lesson-specific operations, contracts, examples and explanations are tailored to Lesson ${L.number}.\n`;
+  const fence = "```";
+  const snippet = (value: string, language = "powershell") => `${fence}${language}\n${value}\n${fence}`;
+  const packageJson = JSON.parse(await readFile(new URL("package.json", ROOT), "utf8")) as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
+  const dependencyRows = Object.entries(packageJson.dependencies).map(([name, version]) => `| ${name} | ${version} |`).join("\n");
+  return `# Mastra · Lesson ${number} · ${L.title}
+
+${L.description}
+
+![Lesson ${number} application](docs/application-preview.png)
+
+## What this application does
+
+${L.labDescription}
+
+**Practical mode:** ${L.localMode}.
+
+${L.scope}
+
+## Run the application
+
+Use **Node.js 24+**. Each lesson is an independent repository with its own dependency lockfile.
+
+${snippet(`git clone ${repository}.git\ncd Udemy-Mastra-lesson${number}-app\nnpm ci\nnpm start`)}
+
+Open **http://127.0.0.1:${3200 + L.number}** and choose **Run practical lab**. The practical operation requires no model key. Starting the server does not make a provider request. Keep the terminal open; Ctrl+C stops it. To change the port, set PORT in the environment or local .env file.
+
+## Application pages
+
+| Page | Content |
+| --- | --- |
+| Application lab | Editable JSON cases, actual execution, formatted result, event log and structured metadata |
+| What you will learn | Lesson objectives, comprehension checks and a concrete exercise |
+| How to run | Installation, local/live modes, commands and troubleshooting |
+| Architecture & workflow | The practical execution sequence and the actual request runner |
+| Code walkthrough | Source-derived excerpts with GitHub line references |
+
+The application supports light/dark themes, mobile layouts, sanitized Markdown, syntax-highlighted code and copy-code controls.
+
+## Practical execution workflow
+
+| Stage | Source | Actual behavior |
+| --- | --- | --- |
+${L.readmeWorkflow.map(item => `| ${item.step} | [${item.component}](${item.component}) | ${item.behavior} |`).join("\n")}
+
+The browser posts JSON to **POST /api/lab**. The host validates the envelope, runs the lesson implementation and sends NDJSON events. The UI renders the actual result and a separate application outcome. **GET /api/config** exposes public lesson metadata and credential-presence readiness, never credential values.
+
+## Classroom cases and expected outcomes
+
+${L.examples.map((item, index) => `### ${index + 1}. ${item.name}\n\n${snippet(JSON.stringify(item.input, null, 2), "json")}\n\n**Expected:** ${item.expected}`).join("\n\n")}
+
+## Interpreting the result
+
+${L.outcomeNotes.map(note => `- ${note}`).join("\n")}
+
+**Complete** means the operation met its implemented completion checks. **Needs attention** exposes a business, format or validation finding. **Could not finish** is an execution/request failure. **Cancelled** is a separate user action. Read the evidence before treating any runtime status as task correctness.
+
+## Optional live-agent workflow
+
+${L.liveWorkflow.map((step, index) => `${index + 1}. ${step}`).join("\n")}
+
+The live button uses **POST /api/query** and a real provider, and may incur API usage. Tests use an explicit SDK model adapter; no paid provider call is claimed by the test evidence.
+
+Configure your own credentials locally, preserving any existing .env:
+
+${snippet('if (!(Test-Path .env)) { Copy-Item .env.example .env }\nnotepad .env')}
+
+${snippet((await readFile(new URL(".env.example", ROOT), "utf8")).trim(), "dotenv")}
+
+Choose a model your account can access and restart the server. Credentials remain on the host and are ignored by Git. Existing shell values take precedence over the optional .env file. Provider/model availability and supported parameters must be checked for your selected model.
+${[3, 8].includes(L.number) ? `
+## Mastra Studio
+
+${snippet("npm run studio")}
+
+This executes the pinned Mastra CLI with **mastra dev**. The exported Mastra instance in **src/mastra/index.ts** configures **server.port=${4200 + L.number}**; follow the URL printed by the running CLI. Studio runs separately from the student application. ${L.number === 8 ? 'Local trace data is stored under the ignored .mastra directory. No external telemetry exporter is configured.' : 'The bootstrap tutor is available through the actual registry.'}
+` : ""}
+## Build, samples and verification
+
+${snippet('npm run sample\nnpm run build\nnpm test\nnpm run test:browser')}
+
+- **sample:** executes the default practical case without a provider key.
+- **sample:live:** runs an actual provider request after configuration; invoke separately with npm run sample:live.
+- **build:** regenerates all five pages, actual-source excerpts, architecture SVG, this README and the browser bundle.
+- **test:** typechecks and runs offline local-operation, invalid-input, cancellation, real-SDK adapter, generated-content and HTTP-boundary checks, plus lesson-specific regression cases.
+- **test:browser:** uses isolated headless Chrome to execute the real practical lab and its failure case, verify all five pages and mobile layout, check theme persistence, syntax colors and safe Markdown, and save [browser evidence](docs/browser-qa.json). The live-renderer fixture makes no provider request.${L.number === 10 ? ' It also checks partial streaming failure and Stop.' : ''}
+
+Set BROWSER_EXECUTABLE if Chrome/Chromium is not installed at the platform’s standard path. Browser tests are local; GitHub Actions runs npm ci, build and the offline test suite.
+
+## Dependencies
+
+| Runtime package | Pinned version |
+| --- | --- |
+${dependencyRows}
+${[3, 8].includes(L.number) ? `\nThe Studio CLI is pinned to **mastra ${packageJson.devDependencies.mastra}**.\n` : ""}
+The committed package-lock.json fixes the installed dependency tree. A remote model alias is independent of the JavaScript lockfile.
+
+## Student exercise
+
+${L.exercise}
+
+Rebuild after a source change so the explanation pages, line references and README remain consistent with the running code.
+
+## Source and references
+
+${L.sourceFiles.map(path => `- [${path}](${path})`).join("\n")}
+- [HTTP host](src/server.ts)
+- [Execution envelope](src/runner.ts)
+- [Page and README generator](scripts/build-pages.ts)
+${L.docs.map(item => `- [${item.title}](${item.url})`).join("\n")}
+
+Prism’s license is included in [public/prism-LICENSE.txt](public/prism-LICENSE.txt).
+`;
 }
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   for (const [name, content] of Object.entries(await buildPages())) await writeFile(new URL(`public/${name}`, ROOT), content);
   await writeFile(new URL("README.md", ROOT), await buildReadme());
